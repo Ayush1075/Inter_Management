@@ -26,7 +26,11 @@ const Login = () => {
 
   useEffect(() => {
     if (user) {
-      navigate('/admin');
+      if (user.role === 'INTERN') {
+        navigate('/intern-upload');
+      } else {
+        navigate('/admin');
+      }
     }
   }, [user, navigate]);
 

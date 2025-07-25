@@ -16,6 +16,7 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/batches', batchRoutes);
+app.use('/uploads', express.static(require('path').join(__dirname, '../uploads')));
 
 const PORT = process.env.PORT || 5000;
 
