@@ -41,7 +41,7 @@ router.get('/', [auth, admin], async (req, res) => {
 // @desc    Create a user
 // @access  Private (Admin)
 router.post('/', [auth, admin], async (req, res) => {
-    const { email, password, name, phone, role, batchId } = req.body;
+    const { email, password, name, phone, role, batchId, startDate, endDate } = req.body;
 
     try {
         let user = await User.findOne({ email });
@@ -52,14 +52,22 @@ router.post('/', [auth, admin], async (req, res) => {
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
 
-        user = new User({
+        const userData = {
             email,
             name,
             phone,
             password: hashedPassword,
             role,
             batchId: role === 'MENTOR' || role === 'INTERN' ? batchId : null,
-        });
+        };
+
+        // Add date fields for interns
+        if (role === 'INTERN') {
+            userData.startDate = startDate;
+            userData.endDate = endDate;
+        }
+
+        user = new User(userData);
 
         await user.save();
         res.status(201).json({ msg: 'User created successfully' });
@@ -74,12 +82,23 @@ router.post('/', [auth, admin], async (req, res) => {
 // @desc    Update a user
 // @access  Private (Admin)
 router.put('/:id', [auth, admin], async (req, res) => {
-    const { name, email, phone, role, batchId, isActive } = req.body;
+    const { name, email, phone, role, batchId, isActive, startDate, endDate } = req.body;
 
     const userFields = { name, email, phone, role, batchId, isActive };
+    
     // Only assign batchId if the role requires it
     if (role !== 'MENTOR' && role !== 'INTERN') {
         userFields.batchId = null;
+    }
+
+    // Add date fields for interns
+    if (role === 'INTERN') {
+        userFields.startDate = startDate;
+        userFields.endDate = endDate;
+    } else {
+        // Remove date fields if role is changed from INTERN to something else
+        userFields.startDate = undefined;
+        userFields.endDate = undefined;
     }
 
     try {
@@ -234,6 +253,74 @@ router.get('/download/:filename', [auth, admin], (req, res) => {
   } else {
     res.status(404).json({ msg: 'File not found.' });
     }
+});
+
+// @route   GET api/users/internship-alerts
+// @desc    Get interns whose internship is ending soon
+// @access  Private (Admin)
+router.get('/internship-alerts', [auth, admin], async (req, res) => {
+  try {
+    const now = new Date();
+    const warningDate = new Date(now.getTime() + (7 * 24 * 60 * 60 * 1000)); // 7 days from now
+    
+    // Find interns whose end date is within the next 7 days
+    const nearingCompletion = await User.find({
+      role: 'INTERN',
+      isActive: true,
+      endDate: {
+        $gte: now,
+        $lte: warningDate
+      }
+    }).select('-password').populate('batchId', 'name');
+
+    // Find interns whose internship has already ended
+    const completed = await User.find({
+      role: 'INTERN',
+      isActive: true,
+      endDate: {
+        $lt: now
+      }
+    }).select('-password').populate('batchId', 'name');
+
+    res.json({
+      nearingCompletion: nearingCompletion.map(intern => ({
+        ...intern.toObject(),
+        daysRemaining: Math.ceil((intern.endDate - now) / (1000 * 60 * 60 * 24))
+      })),
+      completed: completed.map(intern => ({
+        ...intern.toObject(),
+        daysOverdue: Math.ceil((now - intern.endDate) / (1000 * 60 * 60 * 24))
+      }))
+    });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+// @route   PUT api/users/:id/deactivate
+// @desc    Deactivate an intern (when internship ends)
+// @access  Private (Admin)
+router.put('/:id/deactivate', [auth, admin], async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    
+    if (!user) {
+      return res.status(404).json({ msg: 'User not found' });
+    }
+
+    if (user.role !== 'INTERN') {
+      return res.status(400).json({ msg: 'Can only deactivate interns' });
+    }
+
+    user.isActive = false;
+    await user.save();
+
+    res.json({ msg: 'Intern deactivated successfully' });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
 });
 
 module.exports = router; 

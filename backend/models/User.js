@@ -26,6 +26,14 @@ const UserSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Batch',
   },
+  startDate: {
+    type: Date,
+    required: function() { return this.role === 'INTERN'; }
+  },
+  endDate: {
+    type: Date,
+    required: function() { return this.role === 'INTERN'; }
+  },
   isActive: {
     type: Boolean,
     default: true,

@@ -7,6 +7,7 @@ const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true); // Add loading state
 
   const logout = () => {
     localStorage.removeItem('token');
@@ -31,20 +32,27 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       console.error("Failed to decode or validate token:", error);
       logout();
+    } finally {
+      setLoading(false); // Set loading to false after token check
     }
   }, []);
 
   const login = async (email, password) => {
-    const res = await axios.post('/api/auth/login', { email, password });
-    const { token } = res.data;
-    localStorage.setItem('token', token);
-    setAuthToken(token);
-    const decodedToken = jwtDecode(token);
-    setUser(decodedToken.user);
+    setLoading(true); // Set loading during login
+    try {
+      const res = await axios.post('/api/auth/login', { email, password });
+      const { token } = res.data;
+      localStorage.setItem('token', token);
+      setAuthToken(token);
+      const decodedToken = jwtDecode(token);
+      setUser(decodedToken.user);
+    } finally {
+      setLoading(false); // Clear loading after login attempt
+    }
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, logout }}>
+    <AuthContext.Provider value={{ user, login, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );
