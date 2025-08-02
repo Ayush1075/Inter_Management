@@ -160,37 +160,62 @@ router.post('/upload-document', auth, upload.single('document'), async (req, res
 
     let skills = [], projects = [], summaryText = '', suggestedRole = '';
     if (req.file.mimetype === 'application/pdf') {
-      const dataBuffer = fs.readFileSync(req.file.path);
-      const pdfData = await pdfParse(dataBuffer);
-      const text = pdfData.text;
-      summaryText = text.slice(0, 1000); // Save first 1000 chars for reference
-      // Simple regex-based extraction (for demo)
-      const skillsMatch = text.match(/Skills[\s:]*([\s\S]*?)(?:\n\n|Projects|Experience|Education|$)/i);
-      if (skillsMatch) {
-        skills = skillsMatch[1].split(/,|\n/).map(s => s.trim()).filter(Boolean);
+      try {
+        const dataBuffer = fs.readFileSync(req.file.path);
+        const pdfData = await pdfParse(dataBuffer);
+        const text = pdfData.text;
+        summaryText = text.slice(0, 1000); // Save first 1000 chars for reference
+        
+        // Enhanced regex-based extraction with better bullet point handling
+        const skillsMatch = text.match(/(?:Skills|Technical Skills|Technologies|Programming Languages)[\s:]*([\s\S]*?)(?:\n\n|Projects|Experience|Education|Work Experience|$)/i);
+        if (skillsMatch) {
+          skills = skillsMatch[1]
+            .split(/,|\n|;/)
+            .map(s => s.trim())
+            .filter(s => s && s.length > 1) // Filter out single characters and empty strings
+            .map(s => s.replace(/^[•\-\*\.\s]+/, '').trim()) // Remove bullet points and leading whitespace
+            .map(s => s.replace(/[•\-\*\.\s]+$/, '').trim()) // Remove trailing bullet points and whitespace
+            .filter(s => s && s.length > 1 && !/^[•\-\*\.\s]+$/.test(s)); // Filter again after cleaning
+        }
+        
+        // Try multiple project section patterns
+        const projectsMatch = text.match(/(?:Projects|Key Projects|Personal Projects|Work Projects)[\s:]*([\s\S]*?)(?:\n\n|Skills|Experience|Education|Work Experience|$)/i);
+        if (projectsMatch) {
+          projects = projectsMatch[1]
+            .split(/\n/)
+            .map(p => p.trim())
+            .filter(p => p && p.length > 1) // Filter out single characters and empty strings
+            .map(p => p.replace(/^[•\-\*\.\s]+/, '').trim()) // Remove bullet points and leading whitespace
+            .map(p => p.replace(/[•\-\*\.\s]+$/, '').trim()) // Remove trailing bullet points and whitespace
+            .filter(p => p && p.length > 1 && !/^[•\-\*\.\s]+$/.test(p)); // Filter again after cleaning
+        }
+        
+        // Enhanced role inference based on skills and text content
+        const skillsText = skills.join(' ').toLowerCase();
+        const fullText = text.toLowerCase();
+        
+        if (/react|angular|vue|frontend|javascript|html|css|typescript/.test(skillsText) || /frontend|ui|ux|web design/.test(fullText)) {
+          suggestedRole = 'Frontend Engineer';
+        } else if (/node|express|django|flask|backend|api|java|c#|spring|python|php/.test(skillsText) || /backend|server|api|database/.test(fullText)) {
+          suggestedRole = 'Backend Engineer';
+        } else if (/data|ml|machine learning|ai|pandas|numpy|scikit|tensorflow|pytorch|statistics/.test(skillsText) || /data science|machine learning|analytics/.test(fullText)) {
+          suggestedRole = 'Data Scientist';
+        } else if (/devops|aws|azure|docker|kubernetes|cloud|ci|cd|jenkins/.test(skillsText) || /devops|infrastructure|deployment/.test(fullText)) {
+          suggestedRole = 'DevOps Engineer';
+        } else if (/fullstack|full-stack|mern|mean|stack/.test(skillsText) || /full stack|fullstack/.test(fullText)) {
+          suggestedRole = 'Full Stack Engineer';
+        } else if (/software|programming|coding|development/.test(skillsText) || /software|programming|development/.test(fullText)) {
+          suggestedRole = 'Software Engineer';
+        } else {
+          suggestedRole = 'Engineer';
+        }
+        
+        summaryText = `Suggested Role: ${suggestedRole}\n\nExtracted Skills: ${skills.join(', ')}\n\nExtracted Projects: ${projects.join(', ')}\n\nDocument Summary:\n${summaryText}`;
+      } catch (error) {
+        console.error('PDF parsing error:', error);
+        summaryText = 'Error parsing PDF content. Please check the file format.';
+        suggestedRole = 'Unknown';
       }
-      const projectsMatch = text.match(/Projects[\s:]*([\s\S]*?)(?:\n\n|Skills|Experience|Education|$)/i);
-      if (projectsMatch) {
-        projects = projectsMatch[1].split(/\n/).map(p => p.trim()).filter(Boolean);
-      }
-      // Infer role based on skills
-      const skillsText = skills.join(' ').toLowerCase();
-      if (/react|angular|vue|frontend|javascript|html|css/.test(skillsText)) {
-        suggestedRole = 'Frontend Engineer';
-      } else if (/node|express|django|flask|backend|api|java|c#|spring/.test(skillsText)) {
-        suggestedRole = 'Backend Engineer';
-      } else if (/data|ml|machine learning|ai|pandas|numpy|scikit|tensorflow|pytorch/.test(skillsText)) {
-        suggestedRole = 'Data Scientist';
-      } else if (/devops|aws|azure|docker|kubernetes|cloud/.test(skillsText)) {
-        suggestedRole = 'DevOps Engineer';
-      } else if (/fullstack|full-stack/.test(skillsText)) {
-        suggestedRole = 'Full Stack Engineer';
-      } else if (/software/.test(skillsText)) {
-        suggestedRole = 'Software Engineer';
-      } else {
-        suggestedRole = 'Engineer';
-      }
-      summaryText = `Suggested Role: ${suggestedRole}\n\n` + summaryText;
     }
 
     const doc = new Document({
@@ -215,7 +240,7 @@ router.post('/upload-document', auth, upload.single('document'), async (req, res
 // @access  Private (Admin)
 router.get('/documents', [auth, admin], async (req, res) => {
   try {
-    const docs = await Document.find().populate('uploader', 'name email');
+    const docs = await Document.find().populate('uploader', 'name email role');
     res.json(docs);
   } catch (err) {
     console.error(err);

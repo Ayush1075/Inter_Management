@@ -7,7 +7,7 @@ const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true); // Add loading state
+  const [loading, setLoading] = useState(true);
 
   const logout = () => {
     localStorage.removeItem('token');
@@ -15,39 +15,93 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
   };
 
-  useEffect(() => {
+  // Check token expiration
+  const isTokenExpired = (token) => {
     try {
-      const token = localStorage.getItem('token');
-      if (token) {
-        setAuthToken(token);
-        const decodedToken = jwtDecode(token);
-        const isExpired = decodedToken.exp * 1000 < Date.now();
-        
-        if (isExpired) {
-          logout();
-        } else {
-          setUser(decodedToken.user);
-        }
-      }
+      const decodedToken = jwtDecode(token);
+      return decodedToken.exp * 1000 < Date.now();
     } catch (error) {
-      console.error("Failed to decode or validate token:", error);
-      logout();
-    } finally {
-      setLoading(false); // Set loading to false after token check
+      return true;
     }
+  };
+
+  // Validate and set user from token
+  const validateAndSetUser = (token) => {
+    try {
+      const decodedToken = jwtDecode(token);
+      if (isTokenExpired(token)) {
+        logout();
+        return false;
+      }
+      setUser(decodedToken.user);
+      return true;
+    } catch (error) {
+      console.error("Failed to decode token:", error);
+      logout();
+      return false;
+    }
+  };
+
+  useEffect(() => {
+    const initializeAuth = () => {
+      try {
+        const token = localStorage.getItem('token');
+        if (token) {
+          setAuthToken(token);
+          if (!validateAndSetUser(token)) {
+            return;
+          }
+        }
+      } catch (error) {
+        console.error("Failed to initialize authentication:", error);
+        logout();
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    initializeAuth();
+  }, []);
+
+  // Set up axios interceptor for automatic logout on 401
+  useEffect(() => {
+    const interceptor = axios.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        if (error.response?.status === 401) {
+          logout();
+        }
+        return Promise.reject(error);
+      }
+    );
+
+    return () => {
+      axios.interceptors.response.eject(interceptor);
+    };
   }, []);
 
   const login = async (email, password) => {
-    setLoading(true); // Set loading during login
+    setLoading(true);
     try {
       const res = await axios.post('/api/auth/login', { email, password });
       const { token } = res.data;
+      
+      if (!token) {
+        throw new Error('No token received from server');
+      }
+
       localStorage.setItem('token', token);
       setAuthToken(token);
-      const decodedToken = jwtDecode(token);
-      setUser(decodedToken.user);
+      
+      if (!validateAndSetUser(token)) {
+        throw new Error('Invalid token received');
+      }
+    } catch (error) {
+      console.error('Login failed:', error);
+      logout();
+      throw error;
     } finally {
-      setLoading(false); // Clear loading after login attempt
+      setLoading(false);
     }
   };
 

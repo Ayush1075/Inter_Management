@@ -8,9 +8,12 @@ import {
   Calendar,
   MessageSquare,
   TrendingUp,
-  Waves
+  Waves,
+  LogOut
 } from 'lucide-react';
 import { Sidebar as StyledSidebar, NavItem, Heading3, Text } from './styled/StyledComponents';
+import { useAuth } from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
 const LogoSection = styled.div`
   display: flex;
@@ -48,7 +51,48 @@ const StyledNavLink = styled(NavLink)`
   margin-bottom: 0.25rem;
 `;
 
+const LogoutButton = styled.button`
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  margin-top: auto;
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: white;
+  border: none;
+  border-radius: 0.5rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
+
+  &:hover {
+    background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+
+  svg {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+`;
+
+const SidebarContainer = styled(StyledSidebar)`
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+`;
+
 const Sidebar = () => {
+  const { logout } = useAuth();
+  const navigate = useNavigate();
+
   const navItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/admin' },
     { icon: Users, label: 'Manage Interns', path: '/manage-interns-new' },
@@ -58,8 +102,13 @@ const Sidebar = () => {
     { icon: TrendingUp, label: 'Monitor Progress', path: '/monitor-progress-new' },
   ];
 
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
+
   return (
-    <StyledSidebar>
+    <SidebarContainer>
       {/* Logo Section */}
       <LogoSection>
         <LogoIcon>
@@ -88,7 +137,13 @@ const Sidebar = () => {
           </StyledNavLink>
         ))}
       </Navigation>
-    </StyledSidebar>
+
+      {/* Logout Button */}
+      <LogoutButton onClick={handleLogout}>
+        <LogOut />
+        <span>Logout</span>
+      </LogoutButton>
+    </SidebarContainer>
   );
 };
 

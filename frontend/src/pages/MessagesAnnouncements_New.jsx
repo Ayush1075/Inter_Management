@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { MessageSquare, Bell, Send, Plus, Search, Filter, Pin, Calendar, Users, Eye, EyeOff } from 'lucide-react';
 import styled from 'styled-components';
 import { 
@@ -21,7 +21,10 @@ import {
   MainContent
 } from '../components/styled/StyledComponents';
 import { useInternshipData } from '../hooks/useInternshipData';
+import useMessages from '../hooks/useMessages';
+import { useAuth } from '../context/AuthContext';
 import Sidebar from '../components/Sidebar';
+import axios from 'axios';
 
 const PageHeader = styled(Flex)`
   margin-bottom: ${theme.spacing[6]};
@@ -148,6 +151,19 @@ const FormRow = styled(Flex)`
 
 const MessagesAnnouncements_New = () => {
   const { interns } = useInternshipData();
+  const { user } = useAuth();
+  const { 
+    messages, 
+    loading, 
+    error, 
+    createMessage, 
+    togglePin, 
+    markAsRead,
+    fetchAdminMessages 
+  } = useMessages();
+  
+  const [allUsers, setAllUsers] = useState([]);
+  
   const [activeTab, setActiveTab] = useState('announcements');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -161,111 +177,65 @@ const MessagesAnnouncements_New = () => {
     pinned: false
   });
 
-  // Mock data for announcements and messages
-  const [announcements, setAnnouncements] = useState([
-    {
-      id: 1,
-      title: 'Welcome to the Internship Program!',
-      content: 'We are excited to have you join our summer internship program. Please check your email for onboarding materials.',
-      type: 'announcement',
-      author: 'Program Manager',
-      date: '2024-01-15',
-      pinned: true,
-      views: 24,
-      recipients: 'all'
-    },
-    {
-      id: 2,
-      title: 'Weekly Team Meeting',
-      content: 'Our weekly team meeting will be held every Friday at 2 PM in the conference room.',
-      type: 'info',
-      author: 'Team Lead',
-      date: '2024-01-14',
-      pinned: false,
-      views: 18,
-      recipients: 'all'
-    },
-    {
-      id: 3,
-      title: 'Project Deadline Reminder',
-      content: 'Reminder: Your mid-term project is due next Friday. Please submit your code and documentation.',
-      type: 'urgent',
-      author: 'Supervisor',
-      date: '2024-01-13',
-      pinned: true,
-      views: 20,
-      recipients: 'development'
-    }
-  ]);
+  // Check if user can create announcements
+  const canCreateAnnouncements = ['CEO', 'HR', 'MENTOR'].includes(user?.role);
 
-  const [messages, setMessages] = useState([
-    {
-      id: 1,
-      content: 'Great work on the presentation today! Keep up the excellent progress.',
-      author: 'Mentor',
-      recipient: 'John Doe',
-      date: '2024-01-15',
-      time: '10:30 AM',
-      read: true
-    },
-    {
-      id: 2,
-      content: 'Please review the code changes I made to your project and let me know if you have any questions.',
-      author: 'Code Reviewer',
-      recipient: 'Jane Smith',
-      date: '2024-01-15',
-      time: '09:15 AM',
-      read: false
-    },
-    {
-      id: 3,
-      content: 'Your task has been updated with additional requirements. Check the task management system.',
-      author: 'Project Manager',
-      recipient: 'Mike Johnson',
-      date: '2024-01-14',
-      time: '04:45 PM',
-      read: true
-    }
-  ]);
-
-  const createAnnouncement = () => {
-    const announcement = {
-      id: Date.now(),
-      ...newAnnouncement,
-      author: 'You',
-      date: new Date().toISOString().split('T')[0],
-      views: 0
+  // Fetch all users for specific recipient selection
+  useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        const response = await axios.get('/api/users');
+        setAllUsers(response.data);
+      } catch (err) {
+        console.error('Error fetching users:', err);
+      }
     };
     
-    setAnnouncements([announcement, ...announcements]);
-    setNewAnnouncement({
-      title: '',
-      content: '',
-      type: 'announcement',
-      recipients: 'all',
-      specificRecipient: '',
-      pinned: false
-    });
-    setShowCreateModal(false);
+    if (canCreateAnnouncements) {
+      fetchUsers();
+    }
+  }, [canCreateAnnouncements]);
+
+  const createAnnouncement = async () => {
+    if (!newAnnouncement.title || !newAnnouncement.content) {
+      alert('Please fill in all required fields');
+      return;
+    }
+
+    const result = await createMessage(newAnnouncement);
+    if (result.success) {
+      setNewAnnouncement({
+        title: '',
+        content: '',
+        type: 'announcement',
+        recipients: 'all',
+        specificRecipient: '',
+        pinned: false
+      });
+      setShowCreateModal(false);
+    } else {
+      alert(result.error);
+    }
   };
 
-  const togglePin = (id) => {
-    setAnnouncements(announcements.map(ann => 
-      ann.id === id ? { ...ann, pinned: !ann.pinned } : ann
-    ));
+  const handleTogglePin = async (id) => {
+    const result = await togglePin(id);
+    if (!result.success) {
+      alert(result.error);
+    }
   };
 
-  const filteredAnnouncements = announcements.filter(ann => {
-    const matchesSearch = ann.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         ann.content.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesFilter = filterType === 'all' || ann.type === filterType;
+  const filteredAnnouncements = messages.filter(msg => {
+    const matchesSearch = msg.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         msg.content?.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesFilter = filterType === 'all' || msg.type === filterType;
     return matchesSearch && matchesFilter;
   });
 
   const filteredMessages = messages.filter(msg => {
-    const matchesSearch = msg.content.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         msg.author.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         msg.recipient.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSearch = msg.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         msg.content?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         msg.author?.name?.toLowerCase().includes(searchTerm.toLowerCase());
     return matchesSearch;
   });
 
@@ -305,10 +275,12 @@ const MessagesAnnouncements_New = () => {
               <Heading1>Messages & Announcements</Heading1>
               <Text variant="secondary">Communicate with your team and share important updates.</Text>
             </div>
-            <PrimaryButton onClick={() => setShowCreateModal(true)}>
-              <Plus size={20} />
-              Create Announcement
-            </PrimaryButton>
+            {canCreateAnnouncements && (
+              <PrimaryButton onClick={() => setShowCreateModal(true)}>
+                <Plus size={20} />
+                Create Announcement
+              </PrimaryButton>
+            )}
           </PageHeader>
 
       <SearchFilter>
@@ -358,109 +330,163 @@ const MessagesAnnouncements_New = () => {
         </FilterRow>
       </SearchFilter>
 
-      {activeTab === 'announcements' ? (
-        <Section>
-          <Heading3 style={{ marginBottom: theme.spacing[6] }}>
-            <Bell size={20} style={{ marginRight: theme.spacing[2] }} />
-            Announcements ({filteredAnnouncements.length})
-          </Heading3>
-          
-          {filteredAnnouncements.length === 0 ? (
-            <EmptyState>
-              <Bell size={48} color={theme.colors.gray[300]} style={{ marginBottom: theme.spacing[4] }} />
-              <Text>No announcements found matching your criteria.</Text>
-            </EmptyState>
-          ) : (
-            <div>
-              {filteredAnnouncements.map((announcement) => (
-                <MessageItem key={announcement.id} type={announcement.type}>
-                  <MessageHeader>
-                    <MessageMeta>
-                      {getTypeIcon(announcement.type)}
-                      <Text size="sm" variant="muted">{announcement.author}</Text>
-                      <Text size="sm" variant="muted">•</Text>
-                      <Text size="sm" variant="muted">{announcement.date}</Text>
-                      {announcement.pinned && <Pin size={14} color={theme.colors.primary[500]} />}
-                    </MessageMeta>
-                    <MessageActions>
-                      {getTypeBadge(announcement.type)}
-                      <SecondaryButton
-                        size="sm"
-                        onClick={() => togglePin(announcement.id)}
-                      >
-                        <Pin size={14} />
-                        {announcement.pinned ? 'Unpin' : 'Pin'}
-                      </SecondaryButton>
-                    </MessageActions>
-                  </MessageHeader>
-                  
-                  <Heading4 style={{ marginBottom: theme.spacing[2] }}>
-                    {announcement.title}
-                  </Heading4>
-                  
-                  <MessageContent>
-                    <Text>{announcement.content}</Text>
-                  </MessageContent>
-                  
-                  <MessageStats>
-                    <StatItem>
-                      <Eye size={14} color={theme.colors.gray[500]} />
-                      <Text size="sm" variant="muted">{announcement.views} views</Text>
-                    </StatItem>
-                    <StatItem>
-                      <Users size={14} color={theme.colors.gray[500]} />
-                      <Text size="sm" variant="muted">
-                        {announcement.recipients === 'all' ? 'All interns' : `${announcement.recipients} team`}
-                      </Text>
-                    </StatItem>
-                  </MessageStats>
-                </MessageItem>
-              ))}
-            </div>
-          )}
-        </Section>
-      ) : (
-        <Section>
-          <Heading3 style={{ marginBottom: theme.spacing[6] }}>
-            <MessageSquare size={20} style={{ marginRight: theme.spacing[2] }} />
-            Recent Messages ({filteredMessages.length})
-          </Heading3>
-          
-          {filteredMessages.length === 0 ? (
-            <EmptyState>
-              <MessageSquare size={48} color={theme.colors.gray[300]} style={{ marginBottom: theme.spacing[4] }} />
-              <Text>No messages found matching your search.</Text>
-            </EmptyState>
-          ) : (
-            <div>
-              {filteredMessages.map((message) => (
-                <MessageItem key={message.id}>
-                  <MessageHeader>
-                    <MessageMeta>
-                      <Text size="sm" style={{ fontWeight: '500' }}>{message.author}</Text>
-                      <Text size="sm" variant="muted">→</Text>
-                      <Text size="sm" variant="muted">{message.recipient}</Text>
-                      <Text size="sm" variant="muted">•</Text>
-                      <Text size="sm" variant="muted">{message.date} at {message.time}</Text>
-                    </MessageMeta>
-                    <MessageActions>
-                      {message.read ? (
-                        <Badge variant="success">Read</Badge>
-                      ) : (
-                        <Badge variant="warning">Unread</Badge>
-                      )}
-                    </MessageActions>
-                  </MessageHeader>
-                  
-                  <MessageContent>
-                    <Text>{message.content}</Text>
-                  </MessageContent>
-                </MessageItem>
-              ))}
-            </div>
-          )}
-        </Section>
-      )}
+             {activeTab === 'announcements' && (
+         <Section>
+           <Heading3 style={{ marginBottom: theme.spacing[6] }}>
+             <Bell size={20} style={{ marginRight: theme.spacing[2] }} />
+             Announcements ({filteredAnnouncements.length})
+           </Heading3>
+           
+           {loading && (
+             <div style={{ textAlign: 'center', padding: theme.spacing[8] }}>
+               <Text>Loading announcements...</Text>
+             </div>
+           )}
+           
+           {error && (
+             <div style={{ textAlign: 'center', padding: theme.spacing[8], color: theme.colors.error[500] }}>
+               <Text>Error: {error}</Text>
+             </div>
+           )}
+           
+           {!loading && !error && filteredAnnouncements.length === 0 && (
+             <EmptyState>
+               <Bell size={48} color={theme.colors.gray[300]} style={{ marginBottom: theme.spacing[4] }} />
+               <Text>No announcements found matching your criteria.</Text>
+             </EmptyState>
+           )}
+           
+           {!loading && !error && filteredAnnouncements.length > 0 && (
+             <div>
+               {filteredAnnouncements.map((announcement) => (
+                 <MessageItem key={announcement._id} type={announcement.type}>
+                   <MessageHeader>
+                     <MessageMeta>
+                       {getTypeIcon(announcement.type)}
+                       <Text size="sm" variant="muted">{announcement.author?.name || 'Unknown'}</Text>
+                       <Text size="sm" variant="muted">•</Text>
+                       <Text size="sm" variant="muted">{new Date(announcement.createdAt).toLocaleDateString()}</Text>
+                       {announcement.pinned && <Pin size={14} color={theme.colors.primary[500]} />}
+                     </MessageMeta>
+                     <MessageActions>
+                       {getTypeBadge(announcement.type)}
+                       {canCreateAnnouncements && (
+                         <SecondaryButton
+                           size="sm"
+                           onClick={() => handleTogglePin(announcement._id)}
+                         >
+                           <Pin size={14} />
+                           {announcement.pinned ? 'Unpin' : 'Pin'}
+                         </SecondaryButton>
+                       )}
+                     </MessageActions>
+                   </MessageHeader>
+                   
+                   <Heading4 style={{ marginBottom: theme.spacing[2] }}>
+                     {announcement.title}
+                   </Heading4>
+                   
+                   <MessageContent>
+                     <Text>{announcement.content}</Text>
+                   </MessageContent>
+                   
+                   <MessageStats>
+                     <StatItem>
+                       <Eye size={14} color={theme.colors.gray[500]} />
+                       <Text size="sm" variant="muted">{announcement.views} views</Text>
+                     </StatItem>
+                     <StatItem>
+                       <Users size={14} color={theme.colors.gray[500]} />
+                       <Text size="sm" variant="muted">
+                         {announcement.recipients === 'all' ? 'All users' : `${announcement.recipients} team`}
+                       </Text>
+                     </StatItem>
+                   </MessageStats>
+                 </MessageItem>
+               ))}
+             </div>
+           )}
+         </Section>
+       )}
+       
+       {activeTab === 'messages' && (
+         <Section>
+           <Heading3 style={{ marginBottom: theme.spacing[6] }}>
+             <MessageSquare size={20} style={{ marginRight: theme.spacing[2] }} />
+             Recent Messages ({filteredMessages.length})
+           </Heading3>
+           
+           {loading && (
+             <div style={{ textAlign: 'center', padding: theme.spacing[8] }}>
+               <Text>Loading messages...</Text>
+             </div>
+           )}
+           
+           {error && (
+             <div style={{ textAlign: 'center', padding: theme.spacing[8], color: theme.colors.error[500] }}>
+               <Text>Error: {error}</Text>
+             </div>
+           )}
+           
+           {!loading && !error && filteredMessages.length === 0 && (
+             <EmptyState>
+               <MessageSquare size={48} color={theme.colors.gray[300]} style={{ marginBottom: theme.spacing[4] }} />
+               <Text>No messages found matching your search.</Text>
+             </EmptyState>
+           )}
+           
+           {!loading && !error && filteredMessages.length > 0 && (
+             <div>
+               {filteredMessages.map((message) => (
+                 <MessageItem key={message._id} type={message.type}>
+                   <MessageHeader>
+                     <MessageMeta>
+                       {getTypeIcon(message.type)}
+                       <Text size="sm" style={{ fontWeight: '500' }}>{message.author?.name || 'Unknown'}</Text>
+                       <Text size="sm" variant="muted">•</Text>
+                       <Text size="sm" variant="muted">{new Date(message.createdAt).toLocaleDateString()}</Text>
+                       {message.pinned && <Pin size={14} color={theme.colors.primary[500]} />}
+                     </MessageMeta>
+                     <MessageActions>
+                       {getTypeBadge(message.type)}
+                       {canCreateAnnouncements && (
+                         <SecondaryButton
+                           size="sm"
+                           onClick={() => handleTogglePin(message._id)}
+                         >
+                           <Pin size={14} />
+                           {message.pinned ? 'Unpin' : 'Pin'}
+                         </SecondaryButton>
+                       )}
+                     </MessageActions>
+                   </MessageHeader>
+                   
+                   <Heading4 style={{ marginBottom: theme.spacing[2] }}>
+                     {message.title}
+                   </Heading4>
+                   
+                   <MessageContent>
+                     <Text>{message.content}</Text>
+                   </MessageContent>
+                   
+                   <MessageStats>
+                     <StatItem>
+                       <Eye size={14} color={theme.colors.gray[500]} />
+                       <Text size="sm" variant="muted">{message.views} views</Text>
+                     </StatItem>
+                     <StatItem>
+                       <Users size={14} color={theme.colors.gray[500]} />
+                       <Text size="sm" variant="muted">
+                         {message.recipients === 'all' ? 'All users' : `${message.recipients} team`}
+                       </Text>
+                     </StatItem>
+                   </MessageStats>
+                 </MessageItem>
+               ))}
+             </div>
+           )}
+         </Section>
+       )}
 
       {showCreateModal && (
         <CustomModal onClick={(e) => {
@@ -568,15 +594,16 @@ const MessagesAnnouncements_New = () => {
                   transition: 'all 0.2s ease'
                 }}
               >
-                <option value="all">👥 All Interns</option>
-                <option value="development">💻 Development Team</option>
-                <option value="design">🎨 Design Team</option>
-                <option value="marketing">📈 Marketing Team</option>
-                <option value="individual">👤 Specific Intern</option>
+                                 <option value="all">👥 All Users</option>
+                 <option value="interns">👨‍🎓 Interns</option>
+                 <option value="mentors">👨‍🏫 Mentors</option>
+                 <option value="hr">👔 HR Team</option>
+                 <option value="ceo">👑 CEO</option>
+                 <option value="specific">👤 Specific User</option>
               </select>
             </div>
 
-            {newAnnouncement.recipients === 'individual' && (
+                         {newAnnouncement.recipients === 'specific' && (
               <div style={{ flex: 1 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: theme.spacing[2], marginBottom: theme.spacing[2] }}>
                   <Text style={{ fontWeight: '600', color: theme.colors.gray[700] }}>Select Intern</Text>
@@ -594,12 +621,12 @@ const MessagesAnnouncements_New = () => {
                     transition: 'all 0.2s ease'
                   }}
                 >
-                  <option value="">Choose an intern...</option>
-                  {interns.map((intern) => (
-                    <option key={intern.id} value={intern.id}>
-                      {intern.name} ({intern.email})
-                    </option>
-                  ))}
+                                     <option value="">Choose a user...</option>
+                   {allUsers?.map((user) => (
+                     <option key={user._id} value={user._id}>
+                       {user.name} ({user.email}) - {user.role}
+                     </option>
+                   ))}
                 </select>
               </div>
             )}
@@ -690,7 +717,7 @@ const MessagesAnnouncements_New = () => {
             </SecondaryButton>
             <PrimaryButton 
               onClick={createAnnouncement}
-              disabled={!newAnnouncement.title || !newAnnouncement.content || (newAnnouncement.recipients === 'individual' && !newAnnouncement.specificRecipient)}
+                             disabled={!newAnnouncement.title || !newAnnouncement.content || (newAnnouncement.recipients === 'specific' && !newAnnouncement.specificRecipient)}
               style={{ 
                 padding: `${theme.spacing[3]} ${theme.spacing[5]}`,
                 borderRadius: theme.radius.lg,

@@ -6,15 +6,37 @@ import {
   Download, MoreVertical, Eye, Edit, Trash2, Mail, Phone, ChevronRight,
   Clock, MapPin, GraduationCap, Building, User, UserCheck, AlertCircle,
   BarChart3, Settings, X, FileText, Star, Code, Download as DownloadIcon,
-  ExternalLink, Maximize2, Minimize2, Plus
+  ExternalLink, Maximize2, Minimize2, Plus, LogOut, ZoomIn, ZoomOut,
+  RotateCcw, Loader, MessageSquare, Send
 } from 'lucide-react';
+// We're using iframe for PDF viewing, so no need for react-pdf
+
 import { useAuth } from '../../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { useInternshipData } from '../../hooks/useInternshipData';
+import useMessages from '../../hooks/useMessages';
 import Sidebar from '../../components/Sidebar';
 import axios from 'axios';
 import ReactDOM from "react-dom";
 import innodataticsLogo from '../../assets/innodatatics_logo.png';
+
+// Configure axios defaults
+axios.defaults.baseURL = '';
+axios.defaults.headers.common['Content-Type'] = 'application/json';
+
+// Add request interceptor to include auth token
+axios.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
 
 // Import existing modal components
 import AddUserModal from '../../components/AddUserModal';
@@ -35,6 +57,7 @@ import {
   theme,
   MainContent
 } from '../../components/styled/StyledComponents';
+
 // Dashboard styled components
 const DashboardHeader = styled(Flex)`
   margin-bottom: ${theme.spacing[6]};
@@ -58,7 +81,7 @@ const MainGrid = styled(Grid)`
 `;
 
 const MessageItem = styled(GlassCard)`
-  padding: ${theme.spacing[4]};
+  padding: ${props => props.$padding ? theme.spacing[props.$padding] : theme.spacing[4]};
   margin-bottom: ${theme.spacing[3]};
 `;
 
@@ -74,8 +97,8 @@ const Avatar = styled.div`
   flex-shrink: 0;
   
   ${props => {
-    if (props.type === 'broadcast') return `background: ${theme.colors.primary[100]}; color: ${theme.colors.primary[700]};`;
-    if (props.sender === 'Admin') return `background: ${theme.colors.success[100]}; color: ${theme.colors.success[700]};`;
+    if (props.$type === 'broadcast') return `background: ${theme.colors.primary[100]}; color: ${theme.colors.primary[700]};`;
+    if (props.$sender === 'Admin') return `background: ${theme.colors.success[100]}; color: ${theme.colors.success[700]};`;
     return `background: ${theme.colors.gray[100]}; color: ${theme.colors.gray[700]};`;
   }}
 `;
@@ -119,44 +142,11 @@ const QuickActionButton = styled.button`
   }
 `;
 
-// Tab Navigation Styled Components
-const TabNavigation = styled.nav`
-  display: flex;
-  space-x: 0.5rem;
-  background: ${theme.colors.gray[100]};
-  border-radius: ${theme.radius.xl};
-  padding: 0.5rem;
-  margin-bottom: ${theme.spacing[8]};
-`;
-
-const TabButton = styled.button`
-  display: flex;
-  align-items: center;
-  gap: ${theme.spacing[3]};
-  padding: ${theme.spacing[3]} ${theme.spacing[6]};
-  border-radius: ${theme.radius.lg};
-  font-size: 0.875rem;
-  font-weight: 600;
-  transition: all 0.2s ease;
-  
-  ${props => props.isActive ? `
-    background: white;
-    color: ${theme.colors.primary[600]};
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    transform: scale(1.02);
-  ` : `
-    color: ${theme.colors.gray[600]};
-    &:hover {
-      color: ${theme.colors.gray[900]};
-      background: ${theme.colors.gray[50]};
-    }
-  `}
-`;
-
 const AdminDashboard = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const { getStats, messages, interns } = useInternshipData();
+  const { getStats, interns } = useInternshipData();
+  const { messages, loading: messagesLoading, error: messagesError } = useMessages();
   
   // State for view management
   const [activeTab, setActiveTab] = useState("DASHBOARD");
@@ -188,6 +178,7 @@ const AdminDashboard = () => {
   const [isCreateBatchOpen, setIsCreateBatchOpen] = useState(false);
   const [documents, setDocuments] = useState([]);
   const [selectedDoc, setSelectedDoc] = useState(null);
+  const [isDocModalOpen, setIsDocModalOpen] = useState(false);
   const [isDocPanelOpen, setIsDocPanelOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -480,11 +471,527 @@ const AdminDashboard = () => {
     </div>
   );
 
+  // Document view handler
+  const handleViewDocument = (doc) => {
+    setSelectedDoc(doc);
+    setIsDocModalOpen(true);
+  };
+
+  // Enhanced Document Card Component
+  const EnhancedDocumentCard = ({ doc }) => {
+    const getFileIcon = (filename) => {
+      const ext = filename.split('.').pop().toLowerCase();
+      switch (ext) {
+        case 'pdf':
+          return <FileText className="h-6 w-6 text-red-500" />;
+        case 'doc':
+        case 'docx':
+          return <FileText className="h-6 w-6 text-blue-500" />;
+        default:
+          return <FileText className="h-6 w-6 text-gray-500" />;
+      }
+    };
+
+    const formatFileSize = (bytes) => {
+      if (!bytes) return 'Unknown size';
+      const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(1024));
+      return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
+    };
+
+    return (
+      <div className="group bg-white rounded-2xl border border-gray-200 p-6 hover:shadow-xl hover:border-blue-200 transition-all duration-300 hover:-translate-y-1 relative overflow-hidden">
+        {/* Background gradient overlay */}
+        <div className="absolute inset-0 bg-gradient-to-br from-blue-50/50 to-indigo-50/30 opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-2xl" />
+        
+        <div className="relative z-10">
+          {/* Header */}
+          <div className="flex items-start justify-between mb-4">
+            <div className="flex items-start space-x-4 flex-1 min-w-0">
+              {/* File Icon */}
+              <div className="p-3 bg-gradient-to-br from-slate-100 to-slate-200 rounded-xl shadow-sm group-hover:shadow-md transition-shadow duration-300">
+                {getFileIcon(doc.originalname)}
+              </div>
+              
+              {/* File Info */}
+              <div className="flex-1 min-w-0">
+                <h4 className="text-lg font-semibold text-gray-900 truncate mb-1 group-hover:text-blue-900 transition-colors">
+                  {doc.originalname}
+                </h4>
+                <p className="text-sm text-gray-500 mb-2">
+                  {formatFileSize(doc.size)} • {doc.originalname.split('.').pop().toUpperCase()}
+                </p>
+                
+                {/* Upload Info */}
+                <div className="flex items-center space-x-4 text-xs text-gray-500">
+                  <div className="flex items-center space-x-1">
+                    <User className="h-3 w-3" />
+                    <span>{doc.uploader?.name || 'Unknown'}</span>
+                  </div>
+                  <div className="flex items-center space-x-1">
+                    <Clock className="h-3 w-3" />
+                    <span>{new Date(doc.uploadedAt).toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric'
+                    })}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            {/* Status Badge */}
+            <div className="flex flex-col items-end space-y-2">
+              {doc.suggestedRole && (
+                <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-sm">
+                  <Award className="h-3 w-3 mr-1" />
+                  {doc.suggestedRole}
+                </span>
+              )}
+              <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-green-100 text-green-700">
+                Analyzed
+              </span>
+            </div>
+          </div>
+
+          {/* Skills Preview */}
+          {doc.skills && doc.skills.length > 0 && (
+            <div className="mb-4">
+              <div className="flex items-center space-x-2 mb-2">
+                <Code className="h-4 w-4 text-blue-500" />
+                <span className="text-sm font-medium text-gray-700">Skills ({doc.skills.length})</span>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {doc.skills.slice(0, 3).map((skill, index) => (
+                  <span
+                    key={index}
+                    className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200"
+                  >
+                    {skill}
+                  </span>
+                ))}
+                {doc.skills.length > 3 && (
+                  <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-gray-100 text-gray-600">
+                    +{doc.skills.length - 3} more
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Projects Preview */}
+          {doc.projects && doc.projects.length > 0 && (
+            <div className="mb-4">
+              <div className="flex items-center space-x-2 mb-2">
+                <Briefcase className="h-4 w-4 text-purple-500" />
+                <span className="text-sm font-medium text-gray-700">Projects ({doc.projects.length})</span>
+              </div>
+              <div className="text-xs text-gray-600 line-clamp-2">
+                {doc.projects.slice(0, 2).join(' • ')}
+                {doc.projects.length > 2 && ' ...'}
+              </div>
+            </div>
+          )}
+
+          {/* Action Buttons */}
+          <div className="flex items-center justify-between pt-4 border-t border-gray-100">
+            <div className="flex space-x-2">
+              <button
+                onClick={() => handleViewDocument(doc)}
+                className="flex items-center space-x-1 px-3 py-2 text-sm font-medium text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors group"
+              >
+                <Eye className="h-4 w-4 group-hover:scale-110 transition-transform" />
+                <span>View</span>
+              </button>
+              <button
+                onClick={() => handleDownload(doc.filename, doc.originalname)}
+                className="flex items-center space-x-1 px-3 py-2 text-sm font-medium text-emerald-600 bg-emerald-50 rounded-lg hover:bg-emerald-100 transition-colors group"
+              >
+                <Download className="h-4 w-4 group-hover:scale-110 transition-transform" />
+                <span>Download</span>
+              </button>
+            </div>
+            <button
+              onClick={() => handleDeleteDocument(doc._id)}
+              className="flex items-center space-x-1 px-3 py-2 text-sm font-medium text-red-600 bg-red-50 rounded-lg hover:bg-red-100 transition-colors group"
+            >
+              <Trash2 className="h-4 w-4 group-hover:scale-110 transition-transform" />
+              <span>Delete</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Enhanced Document Detail Modal with all improvements
+  const DocumentDetailModal = ({ isOpen, onClose, document }) => {
+    const [pdfUrl, setPdfUrl] = useState('');
+    const [pdfBlob, setPdfBlob] = useState(null);
+    const [isLoadingPdf, setIsLoadingPdf] = useState(false);
+    const [pdfError, setPdfError] = useState(null);
+
+    if (!document) return null;
+
+    const getFileIcon = (filename) => {
+      const ext = filename.split('.').pop().toLowerCase();
+      switch (ext) {
+        case 'pdf':
+          return <FileText className="h-8 w-8 text-red-500" />;
+        case 'doc':
+        case 'docx':
+          return <FileText className="h-8 w-8 text-blue-500" />;
+        default:
+          return <FileText className="h-8 w-8 text-gray-500" />;
+      }
+    };
+
+    const formatFileSize = (bytes) => {
+      if (!bytes) return 'Unknown size';
+      const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(1024));
+      return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
+    };
+
+    // Enhanced PDF loading with better error handling
+    useEffect(() => {
+      if (document && document.filename && isOpen) {
+        setIsLoadingPdf(true);
+        setPdfError(null);
+        
+                 // Token is automatically added by axios interceptor
+
+                          // Use axios for consistency with other API calls
+         const timeoutId = setTimeout(() => {
+           setPdfError('Request timed out. Please try again.');
+           setIsLoadingPdf(false);
+         }, 30000);
+
+         axios.get(`/api/users/download/${document.filename}`, {
+           responseType: 'blob',
+           timeout: 30000,
+         })
+         .then(response => {
+           clearTimeout(timeoutId);
+           console.log('PDF blob loaded:', response.data.size, 'bytes', response.data.type);
+           const url = URL.createObjectURL(response.data);
+           setPdfBlob(response.data);
+           setPdfUrl(url);
+           setIsLoadingPdf(false);
+         })
+         .catch(error => {
+           clearTimeout(timeoutId);
+           console.error('Error loading PDF:', error);
+           if (error.response?.status === 401) {
+             setPdfError('Authentication failed. Please log in again.');
+           } else if (error.response?.status === 404) {
+             setPdfError('File not found on server.');
+           } else if (error.code === 'ECONNABORTED') {
+             setPdfError('Request timed out. Please try again.');
+           } else {
+             setPdfError(error.response?.data?.msg || error.message || 'Failed to load PDF');
+           }
+           setIsLoadingPdf(false);
+         });
+
+         return () => {
+           clearTimeout(timeoutId);
+         };
+      }
+    }, [document, isOpen]);
+
+    // Cleanup blob URL
+    useEffect(() => {
+      return () => {
+        if (pdfUrl && pdfUrl.startsWith('blob:')) {
+          URL.revokeObjectURL(pdfUrl);
+        }
+      };
+    }, [pdfUrl]);
+
+
+
+         const retryPdfLoad = () => {
+       setPdfError(null);
+       setIsLoadingPdf(true);
+       const timeoutId = setTimeout(() => {
+         setPdfError('Request timed out. Please try again.');
+         setIsLoadingPdf(false);
+       }, 30000);
+
+       axios.get(`/api/users/download/${document.filename}`, {
+         responseType: 'blob',
+         timeout: 30000,
+       })
+       .then(response => {
+         clearTimeout(timeoutId);
+         const url = URL.createObjectURL(response.data);
+         setPdfBlob(response.data);
+         setPdfUrl(url);
+         setIsLoadingPdf(false);
+       })
+       .catch(error => {
+         clearTimeout(timeoutId);
+         console.error('Error loading PDF:', error);
+         if (error.response?.status === 401) {
+           setPdfError('Authentication failed. Please log in again.');
+         } else if (error.response?.status === 404) {
+           setPdfError('File not found on server.');
+         } else if (error.code === 'ECONNABORTED') {
+           setPdfError('Request timed out. Please try again.');
+         } else {
+           setPdfError(error.response?.data?.msg || error.message || 'Failed to load PDF');
+         }
+         setIsLoadingPdf(false);
+       });
+     };
+
+    return (
+      <div className={`fixed inset-0 z-[9999] ${isOpen ? 'block' : 'hidden'}`}>
+        {/* Improved backdrop - lighter and more professional */}
+        <div 
+          className="fixed inset-0 bg-black/40 backdrop-blur-sm transition-opacity duration-300"
+          onClick={onClose}
+        />
+
+        {/* Modal container - Popup style */}
+        <div className="fixed inset-0 overflow-hidden">
+          <div className="flex min-h-full items-center justify-center p-4">
+            <div 
+              className="relative transform overflow-hidden bg-white shadow-2xl transition-all duration-300 w-full max-w-7xl h-[90vh] rounded-2xl"
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Close button - Top right corner */}
+              <button
+                onClick={onClose}
+                className="absolute top-4 right-4 z-10 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all duration-200 bg-white shadow-lg"
+              >
+                <X className="h-6 w-6" />
+              </button>
+
+              {/* Content Layout - Full height */}
+              <div className="flex h-full bg-gray-50/50">
+                {/* Left Panel - PDF Viewer */}
+                <div className="w-3/5 border-r border-gray-200/80 bg-white">
+                  <div className="h-full flex flex-col">
+                                         {/* PDF Header */}
+                     <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200/80 bg-gray-50/50">
+                       <div className="flex items-center space-x-3">
+                         <div className="p-2 bg-blue-500 rounded-lg">
+                           <FileText className="h-5 w-5 text-white" />
+                         </div>
+                         <h4 className="text-lg font-semibold text-gray-900">Document Preview</h4>
+                       </div>
+                       
+                       <div className="flex items-center space-x-2">
+                         <button
+                           onClick={() => handleDownload(document.filename, document.originalname)}
+                           className="px-4 py-2 text-sm font-medium text-blue-600 bg-white border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors"
+                         >
+                           <Download className="h-4 w-4 mr-2" />
+                           Download
+                         </button>
+                       </div>
+                     </div>
+                    
+                    {/* PDF Display Area - Full size */}
+                    <div className="flex-1 bg-gray-100">
+                      {isLoadingPdf ? (
+                        <div className="flex flex-col items-center justify-center h-full space-y-4">
+                          <div className="relative">
+                            <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-200 border-t-blue-600"></div>
+                          </div>
+                          <span className="text-gray-600 font-medium">Loading document...</span>
+                          <div className="text-sm text-gray-500">Please wait while we fetch your document</div>
+                        </div>
+                      ) : pdfError ? (
+                        <div className="flex flex-col items-center justify-center h-full text-center space-y-4">
+                          <div className="p-4 bg-red-50 rounded-2xl">
+                            <FileText className="h-16 w-16 text-red-400 mx-auto" />
+                          </div>
+                          <div>
+                            <h3 className="text-lg font-semibold text-gray-900 mb-2">Failed to Load Document</h3>
+                            <p className="text-gray-600 mb-4">{pdfError}</p>
+                            <button
+                              onClick={retryPdfLoad}
+                              className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium"
+                            >
+                              Try Again
+                            </button>
+                          </div>
+                        </div>
+                      ) : pdfUrl ? (
+                        <iframe
+                          src={pdfUrl}
+                          className="w-full h-full border-0"
+                          title="PDF Viewer"
+                          onLoad={() => {
+                            console.log('PDF iframe loaded successfully');
+                          }}
+                          onError={(error) => {
+                            console.error('PDF iframe error:', error);
+                            setPdfError('Failed to load PDF in iframe');
+                          }}
+                        />
+                      ) : (
+                        <div className="flex flex-col items-center justify-center h-full text-center">
+                          <div className="p-4 bg-gray-50 rounded-2xl mb-4">
+                            <FileText className="h-16 w-16 text-gray-400 mx-auto" />
+                          </div>
+                          <h3 className="text-lg font-semibold text-gray-900 mb-2">Document Unavailable</h3>
+                          <p className="text-gray-600">The document preview is not available</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Panel - Enhanced Analysis Results */}
+                <div className="w-2/5 overflow-y-auto bg-gray-50/30">
+                  <div className="p-6 space-y-6">
+                    {/* AI Analysis Header */}
+                    <div className="text-center pb-6 border-b border-gray-200">
+                      <div className="inline-flex items-center space-x-2 bg-gradient-to-r from-blue-500 to-purple-600 text-white px-6 py-3 rounded-full shadow-lg mb-4">
+                        <Award className="h-5 w-5" />
+                        <span className="font-semibold text-lg">AI Analysis Complete</span>
+                      </div>
+                      <p className="text-gray-600 text-sm">Intelligent insights extracted from the resume</p>
+                    </div>
+
+                    {/* Recommended Role - Enhanced */}
+                    {document.suggestedRole && (
+                      <div className="bg-gradient-to-br from-emerald-50 to-green-50 rounded-2xl p-6 border-2 border-emerald-200 shadow-lg">
+                        <div className="flex items-center space-x-3 mb-4">
+                          <div className="p-3 bg-emerald-500 rounded-xl shadow-lg">
+                            <Award className="h-6 w-6 text-white" />
+                          </div>
+                          <h4 className="text-xl font-bold text-gray-900">Recommended Role</h4>
+                        </div>
+                        <div className="bg-white rounded-xl p-5 border border-emerald-200 shadow-sm">
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="text-3xl font-bold bg-gradient-to-r from-emerald-600 to-green-600 bg-clip-text text-transparent">
+                              {document.suggestedRole}
+                            </span>
+                            <div className="flex items-center space-x-2 text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full">
+                              <Star className="h-4 w-4 fill-current" />
+                              <span className="text-sm font-semibold">AI Matched</span>
+                            </div>
+                          </div>
+                          <div className="flex items-center space-x-4 text-sm text-gray-600">
+                            <div className="flex items-center space-x-1">
+                              <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
+                              <span>High confidence match</span>
+                            </div>
+                            <div className="flex items-center space-x-1">
+                              <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
+                              <span>Skills aligned</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Technical Skills - Enhanced */}
+                    {document.skills && document.skills.length > 0 && (
+                      <div className="bg-gradient-to-br from-purple-50 to-violet-50 rounded-2xl p-6 border-2 border-purple-200 shadow-lg">
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center space-x-3">
+                            <div className="p-3 bg-purple-500 rounded-xl shadow-lg">
+                              <Code className="h-6 w-6 text-white" />
+                            </div>
+                            <h4 className="text-xl font-bold text-gray-900">Technical Skills</h4>
+                          </div>
+                          <div className="bg-purple-100 text-purple-800 px-3 py-1 rounded-full text-sm font-bold">
+                            {document.skills.length} skills
+                          </div>
+                        </div>
+                        <div className="bg-white rounded-xl p-4 border border-purple-200 shadow-sm">
+                          <div className="flex flex-wrap gap-2">
+                            {document.skills.map((skill, index) => (
+                              <span
+                                key={index}
+                                className="inline-flex items-center px-3 py-2 rounded-lg text-sm font-medium bg-purple-50 text-purple-700 border border-purple-200 shadow-sm hover:shadow-md transition-all duration-200 hover:scale-105"
+                              >
+                                {skill}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Projects - Enhanced */}
+                    {document.projects && document.projects.length > 0 && (
+                      <div className="bg-gradient-to-br from-orange-50 to-amber-50 rounded-2xl p-6 border-2 border-orange-200 shadow-lg">
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center space-x-3">
+                            <div className="p-3 bg-orange-500 rounded-xl shadow-lg">
+                              <Briefcase className="h-6 w-6 text-white" />
+                            </div>
+                            <h4 className="text-xl font-bold text-gray-900">Key Projects</h4>
+                          </div>
+                          <div className="bg-orange-100 text-orange-800 px-3 py-1 rounded-full text-sm font-bold">
+                            {document.projects.length} projects
+                          </div>
+                        </div>
+                        <div className="bg-white rounded-xl p-4 border border-orange-200 shadow-sm">
+                          <div className="space-y-3 max-h-48 overflow-y-auto">
+                            {document.projects.map((project, index) => (
+                              <div key={index} className="flex items-start space-x-3 p-3 bg-orange-50 rounded-lg">
+                                <div className="w-2 h-2 bg-orange-500 rounded-full mt-2 flex-shrink-0"></div>
+                                <span className="text-sm text-gray-700 leading-relaxed">{project}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Professional Summary - Enhanced */}
+                    {document.summaryText && (
+                      <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-6 border-2 border-blue-200 shadow-lg">
+                        <div className="flex items-center space-x-3 mb-4">
+                          <div className="p-3 bg-blue-500 rounded-xl shadow-lg">
+                            <FileText className="h-6 w-6 text-white" />
+                          </div>
+                          <h4 className="text-xl font-bold text-gray-900">Professional Summary</h4>
+                        </div>
+                        <div className="bg-white rounded-xl p-5 border border-blue-200 shadow-sm">
+                          <div className="prose prose-sm max-w-none">
+                            <div className="text-gray-700 leading-relaxed whitespace-pre-wrap text-sm">
+                              {document.summaryText || "Based on the comprehensive analysis of the resume, this candidate demonstrates strong technical capabilities and relevant experience. The AI has identified key strengths and areas of expertise that align well with the recommended role. The candidate shows potential for contributing effectively to technical projects and teams."}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    
+                  </div>
+                </div>
+              </div>
+
+
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // Dashboard view content (from Dashboard_New.jsx)
   const renderDashboardView = () => {
-    const dashboardStats = getStats();
-    const recentMessages = messages.slice(-4).reverse();
+    const baseStats = getStats();
+    const recentMessages = messages?.slice(-4).reverse() || [];
     const recentInterns = interns.slice(-3);
+    
+    // Calculate unread messages from backend data
+    const unreadMessages = messages?.filter(message => !message.readBy?.some(read => read.userId === user?._id)).length || 0;
+    
+    const dashboardStats = {
+      ...baseStats,
+      unreadMessages
+    };
 
     return (
       <Container>
@@ -570,36 +1077,67 @@ const AdminDashboard = () => {
             </Flex>
             
             <div>
-              {recentMessages.map((message) => (
-                <MessageItem key={message.id} padding="4">
-                  <Flex gap="3">
-                    <Avatar type={message.type} sender={message.sender}>
-                      {message.sender === 'Admin' ? 'AD' : message.sender.split(' ').map(n => n[0]).join('')}
-                    </Avatar>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <Flex align="center" justify="space-between" style={{ marginBottom: theme.spacing[1] }}>
-                        <Flex align="center" gap="2">
-                          <Text style={{ fontWeight: '500', fontSize: '0.875rem', color: theme.colors.gray[900] }} noMargin>
-                            {message.sender}
+              {messagesLoading && (
+                <div style={{ textAlign: 'center', padding: theme.spacing[4] }}>
+                  <Text>Loading messages...</Text>
+                </div>
+              )}
+              
+              {messagesError && (
+                <div style={{ textAlign: 'center', padding: theme.spacing[4], color: theme.colors.error[500] }}>
+                  <Text>Error: {messagesError}</Text>
+                </div>
+              )}
+              
+              {!messagesLoading && !messagesError && recentMessages.length === 0 && (
+                <div style={{ textAlign: 'center', padding: theme.spacing[4], color: theme.colors.gray[500] }}>
+                  <Text>No recent messages or announcements.</Text>
+                </div>
+              )}
+              
+              {!messagesLoading && !messagesError && recentMessages.length > 0 && (
+                <>
+                  {recentMessages.map((message) => (
+                    <MessageItem key={message._id} $padding="4">
+                      <Flex gap="3">
+                        <Avatar $type={message.type} $sender={message.author?.name}>
+                          {message.author?.name === 'Admin' ? 'AD' : message.author?.name?.split(' ').map(n => n[0]).join('') || 'U'}
+                        </Avatar>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <Flex align="center" justify="space-between" style={{ marginBottom: theme.spacing[1] }}>
+                            <Flex align="center" gap="2">
+                              <Text style={{ fontWeight: '500', fontSize: '0.875rem', color: theme.colors.gray[900] }} noMargin>
+                                {message.author?.name || 'Unknown'}
+                              </Text>
+                              <Text size="sm" variant="muted" noMargin>
+                                → {message.recipients === 'all' ? 'All Users' : message.recipients}
+                              </Text>
+                              {message.type === 'announcement' && (
+                                <Badge variant="primary">Announcement</Badge>
+                              )}
+                              {message.type === 'urgent' && (
+                                <Badge variant="error">Urgent</Badge>
+                              )}
+                              {message.type === 'info' && (
+                                <Badge variant="info">Info</Badge>
+                              )}
+                            </Flex>
+                            <Text size="sm" variant="muted" noMargin>
+                              {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </Text>
+                          </Flex>
+                          <Text size="sm" noMargin>
+                            {message.title}
                           </Text>
-                          <Text size="sm" variant="muted" noMargin>
-                            → {message.receiver}
+                          <Text size="sm" variant="muted" noMargin style={{ marginTop: theme.spacing[1] }}>
+                            {message.content}
                           </Text>
-                          {message.type === 'broadcast' && (
-                            <Badge variant="primary">Broadcast</Badge>
-                          )}
-                        </Flex>
-                        <Text size="sm" variant="muted" noMargin>
-                          {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </Text>
+                        </div>
                       </Flex>
-                      <Text size="sm" noMargin>
-                        {message.content}
-                      </Text>
-                    </div>
-                  </Flex>
-                </MessageItem>
-              ))}
+                    </MessageItem>
+                  ))}
+                </>
+              )}
             </div>
           </GlassCard>
 
@@ -812,55 +1350,127 @@ const AdminDashboard = () => {
         )}
 
         {adminActiveTab === "DOCUMENTS" && (user?.role === 'CEO' || user?.role === 'HR') && (
-          <div className="space-y-6">
-            <h2 className="text-xl font-semibold text-gray-900">Document Management</h2>
-            {documents.length > 0 ? (
-              <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-                <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
-                  <h3 className="text-lg font-medium text-gray-900">Uploaded Documents</h3>
+          <div className="space-y-8">
+            {/* Header Section */}
+            <div className="bg-gradient-to-r from-slate-50 to-blue-50 rounded-2xl border border-gray-200 p-8 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-4">
+                  <div className="p-4 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg">
+                    <FileText className="h-8 w-8 text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-3xl font-bold text-gray-900 mb-2">Document Intelligence</h2>
+                    <p className="text-lg text-gray-600">AI-powered document analysis and management</p>
+                  </div>
                 </div>
-                <div className="divide-y divide-gray-200">
-                  {documents.map(doc => (
-                    <div key={doc._id} className="px-6 py-4 hover:bg-gray-50">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-3">
-                          <FileText className="h-5 w-5 text-gray-400" />
-                          <div>
-                            <p className="text-sm font-medium text-gray-900">{doc.originalName}</p>
-                            <p className="text-xs text-gray-500">
-                              Uploaded by {doc.uploadedBy?.name} on {new Date(doc.uploadedAt).toLocaleDateString()}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <button
-                            data-download-id={doc._id}
-                            onClick={() => handleDownload(doc.filename, doc.originalName)}
-                            className="text-blue-600 hover:text-blue-800 text-sm font-medium flex items-center space-x-1 transition-colors"
-                          >
-                            <Download className="h-4 w-4" />
-                            <span>Download</span>
-                          </button>
-                          <button
-                            onClick={() => handleDeleteDocument(doc._id)}
-                            className="text-red-600 hover:text-red-800 text-sm font-medium flex items-center space-x-1 transition-colors"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                            <span>Delete</span>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                <div className="text-right">
+                  <div className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+                    {documents.length}
+                  </div>
+                  <div className="text-sm text-gray-500 font-medium">
+                    document{documents.length !== 1 ? 's' : ''} analyzed
+                  </div>
                 </div>
               </div>
+              
+              {/* Stats Row */}
+              <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
+                  <div className="flex items-center space-x-3">
+                    <div className="p-2 bg-emerald-100 rounded-lg">
+                      <Award className="h-5 w-5 text-emerald-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">Roles Suggested</p>
+                      <p className="text-xl font-bold text-gray-900">
+                        {documents.filter(doc => doc.suggestedRole).length}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
+                  <div className="flex items-center space-x-3">
+                    <div className="p-2 bg-blue-100 rounded-lg">
+                      <Code className="h-5 w-5 text-blue-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">Skills Extracted</p>
+                      <p className="text-xl font-bold text-gray-900">
+                        {documents.reduce((total, doc) => total + (doc.skills?.length || 0), 0)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
+                  <div className="flex items-center space-x-3">
+                    <div className="p-2 bg-purple-100 rounded-lg">
+                      <Briefcase className="h-5 w-5 text-purple-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">Projects Found</p>
+                      <p className="text-xl font-bold text-gray-900">
+                        {documents.reduce((total, doc) => total + (doc.projects?.length || 0), 0)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
+                  <div className="flex items-center space-x-3">
+                    <div className="p-2 bg-amber-100 rounded-lg">
+                      <TrendingUp className="h-5 w-5 text-amber-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">Analysis Rate</p>
+                      <p className="text-xl font-bold text-gray-900">100%</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Documents Grid */}
+            {documents.length > 0 ? (
+              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-8">
+                {documents.map(doc => (
+                  <EnhancedDocumentCard key={doc._id} doc={doc} />
+                ))}
+              </div>
             ) : (
-              <div className="text-center py-12">
-                <FileText className="mx-auto h-12 w-12 text-gray-400" />
-                <h3 className="mt-2 text-sm font-medium text-gray-900">No documents found</h3>
-                <p className="mt-1 text-sm text-gray-500">
-                  Upload documents to share with your team.
-                </p>
+              <div className="text-center py-20 bg-gradient-to-br from-gray-50 to-slate-50 rounded-2xl border-2 border-dashed border-gray-300">
+                <div className="max-w-md mx-auto">
+                  <div className="p-6 bg-white rounded-2xl shadow-lg border border-gray-200 mb-6 inline-block">
+                    <FileText className="h-16 w-16 text-gray-400 mx-auto" />
+                  </div>
+                  <h3 className="text-2xl font-bold text-gray-900 mb-4">No Documents Yet</h3>
+                  <p className="text-gray-600 mb-8 leading-relaxed">
+                    Upload documents to unlock AI-powered analysis and get intelligent insights about skills, projects, and role recommendations.
+                  </p>
+                  
+                  {/* Features List */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                    <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
+                      <div className="p-2 bg-blue-100 rounded-lg w-fit mx-auto mb-2">
+                        <FileText className="h-5 w-5 text-blue-600" />
+                      </div>
+                      <p className="font-medium text-gray-900">Auto Analysis</p>
+                      <p className="text-gray-500">PDF documents analyzed instantly</p>
+                    </div>
+                    <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
+                      <div className="p-2 bg-emerald-100 rounded-lg w-fit mx-auto mb-2">
+                        <Code className="h-5 w-5 text-emerald-600" />
+                      </div>
+                      <p className="font-medium text-gray-900">Skill Extraction</p>
+                      <p className="text-gray-500">Technical skills automatically identified</p>
+                    </div>
+                    <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
+                      <div className="p-2 bg-purple-100 rounded-lg w-fit mx-auto mb-2">
+                        <Award className="h-5 w-5 text-purple-600" />
+                      </div>
+                      <p className="font-medium text-gray-900">Role Matching</p>
+                      <p className="text-gray-500">AI suggests best-fit roles</p>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -914,8 +1524,39 @@ const AdminDashboard = () => {
     <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #f8fafc 0%, #ffffff 100%)' }}>
       <Sidebar />
       <MainContent>
+        {/* Header with user info and logout */}
+        <div className="bg-white/80 backdrop-blur-sm border-b border-gray-200 sticky top-0 z-50">
+          <Container>
+            <div className="flex items-center justify-between py-4">
+              <div className="flex items-center space-x-4">
+                <h1 className="text-2xl font-bold text-gray-900">
+                  {mainActiveTab === "DASHBOARD" ? "Dashboard" : "User Management"}
+                </h1>
+                {user && (
+                  <div className="flex items-center space-x-2 text-sm text-gray-600">
+                    <span>Welcome,</span>
+                    <span className="font-semibold text-gray-900">{user.name || user.email}</span>
+                    <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
+                      {user.role}
+                    </span>
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center space-x-4">
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center space-x-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
+                >
+                  <LogOut className="h-4 w-4" />
+                  <span>Logout</span>
+                </button>
+              </div>
+            </div>
+          </Container>
+        </div>
+
         {/* Main tabs for switching between Dashboard and Management */}
-        <div className="border-b border-gray-200 bg-white/80 backdrop-blur-sm sticky top-0 z-40">
+        <div className="border-b border-gray-200 bg-white/80 backdrop-blur-sm sticky top-16 z-40">
           <Container>
             <div className="flex space-x-8">
               {MAIN_TABS.map(({ key, label, icon: Icon }) => (
@@ -964,6 +1605,13 @@ const AdminDashboard = () => {
           isOpen={isBatchModalOpen} 
           onClose={() => setIsBatchModalOpen(false)}
           batch={selectedBatch}
+        />
+
+        {/* Document Detail Modal */}
+        <DocumentDetailModal 
+          isOpen={isDocModalOpen} 
+          onClose={() => setIsDocModalOpen(false)}
+          document={selectedDoc}
         />
       </MainContent>
     </div>
